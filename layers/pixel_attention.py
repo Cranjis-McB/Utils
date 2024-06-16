@@ -28,7 +28,8 @@ class PixelAttention(nn.Module):
     def __init__(self, 
                  in_channels:int, 
                  num_heads:int,
-                 drop_prob:float = 0.0
+                 drop_prob:float = 0.0,
+                 skip_connection = False
                  ) -> None:
         super().__init__()
         
@@ -37,6 +38,7 @@ class PixelAttention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = in_channels // num_heads
         self.drop_prob = drop_prob
+        self.skip_connection = skip_connection
         
         self.w_q = nn.Conv2d(in_channels,  # Query weights
                              in_channels, 
@@ -98,6 +100,9 @@ class PixelAttention(nn.Module):
         
         # (B, C, H*W) => (B, C, H, W)
         context_vec = context_vec.contiguous().view(b, c, h, w)
+        
+        if self.skip_connection:
+            return q + self.w_o(context_vec)
         
         return self.w_o(context_vec) # (B, C, H, W)
 

@@ -224,28 +224,30 @@ class Encoder(nn.Module):
         # Downsampling
         self.down = []
         curr_res = self.in_resolution
-        for i_level in range(self.num_downsamples):
+        for i_level in range(self.num_downsamples + 1):
             block_in = self.ch * min(self.max_ch_multiplier, (i_level + 1))
             block_out = self.ch * min(self.max_ch_multiplier, (i_level + 2))
             
-            # ResBlocks
-            self.down += [ResnetBlock(block_in if index == 0 else block_out, 
-                                      block_out
-                                      ) for index in range(self.num_res_blocks)
-                          ]
-            
-            # PixelAttention if Resolution is under self.attn_resolution
-            if curr_res <= self.attn_resolution:
-                self.down.append(PixelAttention(block_out, self.num_heads))
+            # ResBlocks + PixelAttention
+            for i in range(self.num_res_blocks):
                 
-            # Downsample
-            self.down.append(Downsample(block_out, block_out))
+                # ResnetBlock
+                self.down.append(
+                    ResnetBlock(block_in if i == 0 else block_out, 
+                                block_out
+                               )
+                )
+                
+               # PixelAttention if Resolution is under self.attn_resolution
+                if curr_res <= self.attn_resolution:
+                    self.down.append(PixelAttention(block_out, self.num_heads, skip_connection=True))
             
-            # Update curresnt resolution
-            curr_res = curr_res // 2
+            # Downsample except last
+            if i_level != self.num_downsamples:
+                self.down.append(Downsample(block_out, block_out))
             
-        # No Downsampling in last set of blocks.
-        self.down += [ResnetBlock(block_out) for index in range(self.num_res_blocks)]
+                # Update current resolution
+                curr_res = curr_res // 2
         
         # Sequential Unpacking
         self.down = nn.Sequential(*self.down)
@@ -253,7 +255,7 @@ class Encoder(nn.Module):
         # Middle Block (refinement of downsample features)
         self.mid = nn.Sequential(
             ResnetBlock(block_out), 
-            PixelAttention(block_out, self.num_heads), 
+            PixelAttention(block_out, self.num_heads, skip_connection=True), 
             ResnetBlock(block_out)
             )
         
@@ -273,11 +275,103 @@ class Encoder(nn.Module):
         
         return x
 
-
 ###############################################################
 
 ######################## Decoder ##############################
 
+class Decoder(nn.Module):
+    """
+    VQ-VAE Decoder. Decode/Decompress the Latent Image to Original Image.
+    -- Inverse of Encoder Architecture
+    """
+    
+    def __init__(self, 
+                 config # Configuration
+                 ):
+        super(Decoder, self).__init__()
+        
+        self.in_resolution = config['in_resolution']
+        self.out_resolution = config['out_resolution']
+        self.in_channels = config['in_channels']
+        self.ch = config['ch']
+        self.out_channels = config['out_channels']
+        self.num_res_blocks = config['num_res_blocks']
+        self.attn_resolution = config['attn_resolution']
+        self.max_ch_multiplier = config['max_ch_multiplier']
+        self.num_heads = config['num_heads']
+        self.num_upsamples = int(math.log2(self.in_resolution//self.out_resolution))
+        
+        
+        block_in = self.ch * self.max_ch_multiplier
+        curr_res = self.out_resolution
+        
+        # Input Convolution
+        self.conv_in = nn.Conv2d(self.out_channels, 
+                                 block_in, 
+                                 kernel_size=3, 
+                                 padding=1
+                                 )
+        
+        # Middle
+        self.mid = nn.Sequential(
+            ResnetBlock(block_in), 
+            PixelAttention(block_in, self.num_heads, skip_connection=True), 
+            ResnetBlock(block_in)
+            )
+        
+        # Upsampling
+        self.up = []
+        
+        for i_level in reversed(range(self.num_upsamples + 1)):
+            
+            # Output channel
+            block_out = self.ch * min(self.max_ch_multiplier, i_level + 1)
+            
+            # Upsample except last
+            if i_level != self.num_upsamples:
+                self.up.append(Upsample(block_in, block_in))
+                
+                # Update current resolution
+                curr_res = curr_res * 2
+            
+            # ResBlocks + PixelAttention
+            for i in range(self.num_res_blocks):
+                
+                # ResnetBlock
+                self.up.append(
+                    ResnetBlock(block_in if i == 0 else block_out, 
+                                block_out
+                               )
+                )
+                
+               # PixelAttention if Resolution is under self.attn_resolution
+                if curr_res <= self.attn_resolution:
+                    self.up.append(PixelAttention(block_out, self.num_heads, skip_connection=True))
+                    
+            # Update Input channels                    
+            block_in = block_out
+        
+        # Sequential Unpacking
+        self.up = nn.Sequential(*self.up)
+        
+        # Output Convolution
+        self.conv_out = NormActConv(block_out, 
+                                    self.in_channels, 
+                                    kernel_size=3,
+                                    use_act=False
+                                    )
+
+        
+        
+    
+    def forward(self, x):
+        
+        x = self.conv_in(x)
+        x = self.mid(x)
+        x = self.up(x)
+        x = self.conv_out(x)
+        
+        return x
 
 ###############################################################
 
@@ -289,14 +383,20 @@ if __name__ == "__main__":
         config = yaml.safe_load(file)
    
     # Initialize the Model
-    encoder_config = config['encoder']
-    encoder = Encoder(encoder_config)
+    model_config = config['model']
+    encoder = Encoder(model_config)
+    decoder = Decoder(model_config)
     
     # Initialize Input
     batch_size = 4
-    ch = encoder_config['in_channels'] 
-    res = encoder_config['in_resolution']
+    ch = model_config['in_channels'] 
+    res = model_config['in_resolution']
     
+    # Encode
     x = torch.randn(batch_size, ch, res, res)
-    print(encoder(x).shape)
-        
+    enc_out = encoder(x)
+    print(f'Encoder Output shape: {enc_out.shape}')
+    
+    # Decode
+    dec_out = decoder(enc_out)
+    print(f'Decoder Output shape: {dec_out.shape}')
