@@ -66,8 +66,13 @@ class PixelAttention(nn.Module):
                              padding=0
                              )
     
-    def forward(self, q, k, v, mask=None):
+    def forward(self, q, k=None, v=None, mask=None):
         
+        # If only one input is fed then consider query=key=value
+        if (k is None) and (v is None):
+            k = q
+            v = q
+            
         b, c, h, w = q.shape # Batch Size, channels, Height, and Width
         
         query = self.w_q(q) # (B, C, H, W) => (B, C, H, W)
@@ -104,7 +109,7 @@ if __name__ == "__main__":
     x = torch.randn(b, c, h, w)
     
     # Pixel-Attention
-    pa = PixelAttention(32, 8)
-    out = pa(x, x, x)
+    pa = PixelAttention(32, 4)
+    out = pa(x)
     
     print(f'Output shape: {out.shape}')

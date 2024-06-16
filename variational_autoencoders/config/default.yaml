@@ -1,0 +1,12 @@
+encoder: # VQ-VAE encoder params.
+  in_resolution: 256 # Input Image Resolution
+  out_resolution: 32 # Output/Latent space Resolution
+  in_channels: 3
+  out_channels: 3
+  ch: 128 # First Convolution channel
+  num_res_blocks: 2 # Number of Resnet Blocks at each level
+  attn_resolution: 32 # Resolution to apply PixelAttention Blocks
+  num_heads: 4 # Number of attention heads
+  max_ch_multiplier: 4 # Maximum Channel Multiplier
+  
+  
