@@ -8,5 +8,3 @@ encoder: # VQ-VAE encoder params.
   attn_resolution: 32 # Resolution to apply PixelAttention Blocks
   num_heads: 4 # Number of attention heads
   max_ch_multiplier: 4 # Maximum Channel Multiplier
-  
-  
