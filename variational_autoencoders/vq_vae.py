@@ -15,7 +15,7 @@ References
 1. Latent Diffusion Autoencoder. https://github.com/CompVis/latent-diffusion/blob/main/ldm/models/autoencoder.py
 2. Variational Autoencoder by Umar Jamil. "https://www.youtube.com/watch?v=iwEzwTTalbg"
 3. Implementing Variational Auto Encoder from Scratch in Pytorch by ExplainingAI. "https://www.youtube.com/watch?v=pEsC0Vcjc7c"
-
+4. Vector Quantizer by taming-transformers. "https://github.com/CompVis/taming-transformers/blob/master/taming/modules/vqvae/quantize.py"
 """
 
 # Imports
@@ -23,6 +23,7 @@ import math
 import yaml
 import torch
 import torch.nn as nn
+from einops import rearrange
 from layers.pixel_attention import PixelAttention
 
 ######################## Utility Modules ########################
@@ -372,6 +373,87 @@ class Decoder(nn.Module):
         x = self.conv_out(x)
         
         return x
+
+###############################################################
+
+#################### Vector Quantizer #########################
+
+class VectorQuantizer(nn.Module):
+    """
+    Quantize the Encoder output according to the codebook.
+    """
+    def __init__(self, 
+                 config
+                 ):
+        super(VectorQuantizer, self).__init__()
+        
+        
+        self.num_embed = config['num_embed']
+        self.embed_dim = config['embed_dim']
+        self.beta = config['beta']
+        
+        # Codebook params
+        self.codebook = nn.Embedding(self.num_embed, self.embed_dim)
+        self.codebook.weight.data.uniform_(-1.0/self.num_embed, 1.0/self.num_embed)
+    
+    def forward(self, x):
+        
+        # (B, self.embed_dim, H, W) => (B, H, W, self.embed_dim)
+        x = rearrange(x, 'b c h w -> b h w c').contiguous()
+        
+        # (B, H, W, C) => (BHW, self.embed_dim)
+        x_flattend = x.view(-1, self.embed_dim)
+        
+        # Distances between x and codebook. x^2 + codebook^2 - 2 * x * codebook
+        # (BHW, self.num_embed)
+        d = torch.sum(x_flattend ** 2, dim=1, keepdim=True) + \
+            torch.sum(self.codebook.weight ** 2, dim=1) - 2 * \
+            torch.einsum('be, en -> bn', x_flattend, rearrange(self.codebook.weight, 'n e -> e n'))
+        
+        # Get nearest codebook indices to the encoder output vectors
+        min_encoding_indices = torch.argmin(d, dim=1) # (BHW, )
+        
+        # Get Quantized Output
+        # (BHW, self.embed_dim) => (B, H, W, self.embed_dim) 
+        x_q = self.codebook(min_encoding_indices).view(x.shape)
+        
+        # Compute Loss
+        loss = self.beta * torch.mean((x_q.detach() - x)**2) + \
+               torch.mean((x_q - x.detach())**2)
+        
+        # Preserve Gradients
+        x_q = x + (x_q - x).detach()
+        
+        # Reshape back to the original input shape
+        # (B, H, W, self.embed_dim) => (B, self.embed_dim, H, W)
+        x_q = rearrange(x, 'b h w c -> b c h w')
+        
+        return x_q, loss
+
+###############################################################
+
+
+####################### VQ-VAE ################################
+
+class VQVAE(nn.Module):
+    """
+    VQ-VAE Model as implemented in Latent Diffusion Implementation.
+    """
+    def __init__(self, 
+                 config
+                 ):
+        super(VQVAE, self).__init__()
+        
+        pass
+    
+    def encode(self, x):
+        pass
+    
+    def decode(self, x):
+        pass
+    
+    def forward(self, x):
+        pass
 
 ###############################################################
 

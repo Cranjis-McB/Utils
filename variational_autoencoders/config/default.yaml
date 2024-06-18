@@ -8,3 +8,7 @@ model: # VQ-VAE params.
   attn_resolution: 32 # Resolution to apply PixelAttention Blocks
   num_heads: 4 # Number of attention heads
   max_ch_multiplier: 4 # Maximum Channel Multiplier
+  
+  num_embed: 8192 # Vector Quantizer Codebook length
+  embed_dim: 3 # Dim of each code in codebbok
+  beta: 0.25 # Weight given to commitment loss.
