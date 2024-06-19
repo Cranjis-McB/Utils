@@ -207,6 +207,7 @@ class Encoder(nn.Module):
         self.out_resolution = config['out_resolution']
         self.in_channels = config['in_channels']
         self.ch = config['ch']
+        self.z_channels = config['z_channels']
         self.out_channels = config['out_channels']
         self.num_res_blocks = config['num_res_blocks']
         self.attn_resolution = config['attn_resolution']
@@ -262,7 +263,7 @@ class Encoder(nn.Module):
         
         # Output Convolution
         self.conv_out = NormActConv(block_out, 
-                                    self.out_channels, 
+                                    self.z_channels, 
                                     kernel_size=3
                                     )
         
@@ -296,6 +297,7 @@ class Decoder(nn.Module):
         self.in_channels = config['in_channels']
         self.ch = config['ch']
         self.out_channels = config['out_channels']
+        self.z_channels = config['z_channels']
         self.num_res_blocks = config['num_res_blocks']
         self.attn_resolution = config['attn_resolution']
         self.max_ch_multiplier = config['max_ch_multiplier']
@@ -307,7 +309,7 @@ class Decoder(nn.Module):
         curr_res = self.out_resolution
         
         # Input Convolution
-        self.conv_in = nn.Conv2d(self.out_channels, 
+        self.conv_in = nn.Conv2d(self.z_channels, 
                                  block_in, 
                                  kernel_size=3, 
                                  padding=1
@@ -357,7 +359,7 @@ class Decoder(nn.Module):
         
         # Output Convolution
         self.conv_out = NormActConv(block_out, 
-                                    self.in_channels, 
+                                    self.out_channels, 
                                     kernel_size=3,
                                     use_act=False
                                     )
@@ -444,16 +446,42 @@ class VQVAE(nn.Module):
                  ):
         super(VQVAE, self).__init__()
         
-        pass
+        self.z_channels = config['z_channels']
+        self.embed_dim = config['embed_dim']
+        
+        # Initialize Encoder
+        self.encoder = Encoder(config)
+        
+        # Initialize Vector Quantizer + Pre and Post Conv
+        self.quantizer = VectorQuantizer(config)
+        self.pre_quant_conv = nn.Conv2d(self.z_channels, self.embed_dim, kernel_size=1)
+        self.post_quant_conv = nn.Conv2d(self.embed_dim, self.z_channels, kernel_size=1) 
+        
+        # Initialize Decoder
+        self.decoder = Decoder(config)
+        
     
     def encode(self, x):
-        pass
+        
+        x = self.encoder(x)
+        x = self.pre_quant_conv(x)
+        x, codebook_loss = self.quantizer(x)
+        
+        return x, codebook_loss
     
     def decode(self, x):
-        pass
+        
+        x = self.post_quant_conv(x)
+        x = self.decoder(x)
+        
+        return x
     
     def forward(self, x):
-        pass
+        
+        x, codebook_loss = self.encode(x)
+        x = self.decode(x)
+        
+        return x, codebook_loss
 
 ###############################################################
 
@@ -466,19 +494,16 @@ if __name__ == "__main__":
    
     # Initialize the Model
     model_config = config['model']
-    encoder = Encoder(model_config)
-    decoder = Decoder(model_config)
+    vqvae = VQVAE(model_config)
     
     # Initialize Input
     batch_size = 4
     ch = model_config['in_channels'] 
     res = model_config['in_resolution']
     
-    # Encode
+    # VQ-VAE Model
     x = torch.randn(batch_size, ch, res, res)
-    enc_out = encoder(x)
-    print(f'Encoder Output shape: {enc_out.shape}')
+    out, cb_loss = vqvae(x)
+    print(f'VQ-VAE Output shape: {out.shape}')
+    print(f'Codebook Loss: {cb_loss}')
     
-    # Decode
-    dec_out = decoder(enc_out)
-    print(f'Decoder Output shape: {dec_out.shape}')
